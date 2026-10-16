@@ -62,4 +62,18 @@ class PollinationsApiTest {
         assertEquals("rate limited", PollinationsApi.errorMessage("{\"error\":\"rate limited\"}", 429));
         assertEquals("HTTP 500", PollinationsApi.errorMessage("oops", 500));
     }
+
+    @Test
+    void decodesTheImageResponse() throws Exception {
+        // Shape verified live against POST /v1/images/generations.
+        String payload = java.util.Base64.getEncoder().encodeToString(new byte[] {1, 2, 3, 4});
+        byte[] bytes = PollinationsApi.parseImageResponse("{\"data\":[{\"b64_json\":\"" + payload + "\"}]}");
+        assertArrayEquals(new byte[] {1, 2, 3, 4}, bytes);
+    }
+
+    @Test
+    void imageResponseWithoutDataIsAnError() {
+        assertThrows(IOException.class, () -> PollinationsApi.parseImageResponse("{\"data\":[]}"));
+        assertThrows(IOException.class, () -> PollinationsApi.parseImageResponse("garbage"));
+    }
 }

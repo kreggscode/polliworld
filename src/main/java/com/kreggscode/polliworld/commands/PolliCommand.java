@@ -12,6 +12,7 @@ import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -87,6 +88,7 @@ public class PolliCommand implements CommandExecutor, TabCompleter {
             case "ask" -> consoleAsk(sender, rest(args));
             case "image" -> consoleImage(sender, rest(args));
             case "models" -> consoleModels(sender);
+            case "say" -> consoleSay(sender, args);
             case "npc" -> consoleNpc(sender, args);
             case "status" -> sender.sendMessage("[PolliWorld] key: " + (plugin.cfg().apiKey().isBlank() ? "none" : "server key set")
                     + " · text " + plugin.cfg().textModel() + " · image " + plugin.cfg().imageModel());
@@ -115,6 +117,8 @@ public class PolliCommand implements CommandExecutor, TabCompleter {
                         plugin.memory().recent("(console)", "console", 12), question);
                 plugin.memory().add("(console)", "console", "user", question);
                 plugin.memory().add("(console)", "console", "assistant", result.content());
+                plugin.getLogger().info("[console] ask: " + result.content());
+                plugin.getLogger().info("[console] " + result.inTokens() + " in / " + result.outTokens() + " out tokens · " + model);
                 plugin.getServer().getScheduler().runTask(plugin, () -> {
                     sender.sendMessage(result.content());
                     sender.sendMessage("· " + result.inTokens() + " in / " + result.outTokens() + " out tokens · " + model);
@@ -125,12 +129,57 @@ public class PolliCommand implements CommandExecutor, TabCompleter {
         });
     }
 
+    /** Console/RCON: /polli say <npc> <message> — ask an NPC with the server's key. */
+    private void consoleSay(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+            sender.sendMessage("Usage: /polli say <npc> <message>");
+            return;
+        }
+        String npcName = args[1];
+        NpcManager.Definition def = plugin.npcManager().get(npcName);
+        if (def == null) {
+            sender.sendMessage("No NPC named " + npcName + ".");
+            return;
+        }
+        String message = String.join(" ", java.util.Arrays.copyOfRange(args, 2, args.length));
+        String key = plugin.cfg().apiKey();
+        if (key.isBlank()) {
+            sender.sendMessage("No api-key in config.yml.");
+            return;
+        }
+        String model = plugin.cfg().textModel();
+        String system = "You are " + npcName + ", a villager NPC on a Minecraft server. Persona: " + def.persona()
+                + ". Stay in character and keep replies to one or two short sentences.";
+        sender.sendMessage("[ack] asking " + npcName + " (" + model + ")…");
+        plugin.pool().submit(() -> {
+            try {
+                PollinationsApi.Completion result = PollinationsApi.chat(
+                        key, model, system, plugin.memory().recent(npcName, "console", 16), message);
+                plugin.memory().add(npcName, "console", "user", message);
+                plugin.memory().add(npcName, "console", "assistant", result.content());
+                plugin.getLogger().info("[console] " + npcName + ": " + result.content());
+                plugin.getLogger().info("[console] " + result.inTokens() + " in / " + result.outTokens() + " out tokens · " + model);
+                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                    sender.sendMessage(npcName + ": " + result.content());
+                    sender.sendMessage("· " + result.inTokens() + " in / " + result.outTokens() + " out tokens · " + model);
+                });
+            } catch (Exception e) {
+                plugin.getLogger().warning("[console] " + npcName + " could not answer: " + e.getMessage());
+                plugin.getServer().getScheduler().runTask(plugin,
+                        () -> sender.sendMessage(npcName + " could not answer: " + e.getMessage()));
+            }
+        });
+    }
+
     private void consoleModels(CommandSender sender) {
         String key = plugin.cfg().apiKey();
+        sender.sendMessage("[ack] reading the live model list…");
         plugin.pool().submit(() -> {
             try {
                 List<PollinationsApi.ModelInfo> list = PollinationsApi.listModels(key);
                 long free = list.stream().filter(m -> !m.paidOnly()).count();
+                plugin.getLogger().info("[console] live text models: " + list.size() + " (" + free + " free, "
+                        + (list.size() - free) + " Paid Pollen)");
                 plugin.getServer().getScheduler().runTask(plugin, () -> {
                     sender.sendMessage("Live text models: " + list.size() + " (" + free + " free, "
                             + (list.size() - free) + " Paid Pollen)");
@@ -165,9 +214,30 @@ public class PolliCommand implements CommandExecutor, TabCompleter {
                 Files.createDirectories(dir.toPath());
                 File out = new File(dir, "console-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) + ".png");
                 ImageIO.write(art, "png", out);
+                plugin.getLogger().info("[console] picture saved: " + out.getPath());
+                // Showcase: paint it onto a real map item and hang it in an
+                // item frame at spawn — this exercises the same MapPainter the
+                // player path uses.
+                try {
+                    World world = plugin.getServer().getWorlds().get(0);
+                    Location pillar = world.getSpawnLocation().add(2, 0, 2);
+                    pillar.getBlock().setType(Material.STONE_BRICKS);
+                    ItemStack map = MapPainter.paint(world, art);
+                    if (map != null) {
+                        Location frameBlock = pillar.clone().add(0, 1, 1).add(0.5, 0, 0.5);
+                        world.spawn(frameBlock, org.bukkit.entity.ItemFrame.class, f -> {
+                            f.setFacingDirection(org.bukkit.block.BlockFace.SOUTH, true);
+                            f.setItem(map);
+                        });
+                        plugin.getLogger().info("[console] map art hung in an item frame at spawn");
+                    }
+                } catch (Exception frameErr) {
+                    plugin.getLogger().warning("[console] frame placement failed: " + frameErr.getMessage());
+                }
                 plugin.getServer().getScheduler().runTask(plugin, () ->
                         sender.sendMessage("Picture saved: " + out.getPath()));
             } catch (Exception e) {
+                plugin.getLogger().warning("[console] image failed: " + e.getMessage());
                 plugin.getServer().getScheduler().runTask(plugin, () -> sender.sendMessage("Image failed: " + e.getMessage()));
             }
         });
@@ -254,6 +324,7 @@ public class PolliCommand implements CommandExecutor, TabCompleter {
                 PollinationsApi.Completion result = PollinationsApi.chat(key, model, system, history, question);
                 plugin.memory().add(ASK_NPC, player.getUniqueId().toString(), "user", question);
                 plugin.memory().add(ASK_NPC, player.getUniqueId().toString(), "assistant", result.content());
+                plugin.getLogger().info("[console] ask: " + result.content());
                 plugin.getServer().getScheduler().runTask(plugin, () -> {
                     if (!player.isOnline()) {
                         return;

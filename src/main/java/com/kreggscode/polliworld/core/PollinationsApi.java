@@ -8,11 +8,9 @@ import com.kreggscode.polliworld.core.MemoryStore.Msg;
 
 import java.io.IOException;
 import java.net.URI;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -134,15 +132,18 @@ public final class PollinationsApi {
 
     public static byte[] image(String apiKey, String prompt, String model, int width, int height)
             throws IOException, InterruptedException {
-        String url = GEN + "/" + URLEncoder.encode(prompt, StandardCharsets.UTF_8).replace("+", "%20")
-                + "?model=" + URLEncoder.encode(model, StandardCharsets.UTF_8)
-                + "&width=" + width + "&height=" + height + "&nologo=true";
-        HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-                .timeout(Duration.ofSeconds(90))
+        // The image API is OpenAI-compatible: POST /v1/images/generations with
+        // a b64_json response (the old GET /<prompt> endpoint is gone).
+        String body = "{\"model\":\"" + model.replace("\"", "") + "\",\"prompt\":\""
+                + prompt.replace("\\", "\\\\").replace("\"", "\\\"") + "\",\"n\":1,\"size\":\""
+                + width + "x" + height + "\"}";
+        HttpRequest req = HttpRequest.newBuilder(URI.create(GEN + "/v1/images/generations"))
+                .timeout(Duration.ofSeconds(120))
                 .header("Authorization", "Bearer " + apiKey)
-                .GET()
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
-        HttpResponse<byte[]> res = HTTP.send(req, HttpResponse.BodyHandlers.ofByteArray());
+        HttpResponse<String> res = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
         if (res.statusCode() == 429) {
             throw new IOException("Pollinations is rate limiting image generation — try again in a few seconds.");
         }
@@ -150,13 +151,31 @@ public final class PollinationsApi {
             throw new IOException("The image model " + model + " needs Paid Pollen. Top up at enter.pollinations.ai or pick a free model with /polli models.");
         }
         if (res.statusCode() != 200) {
-            String body = new String(res.body(), 0, Math.min(300, res.body().length), StandardCharsets.UTF_8);
-            throw new IOException("Image call failed: " + errorMessage(body, res.statusCode()));
+            throw new IOException("Image call failed: " + errorMessage(res.body(), res.statusCode()));
         }
-        if (res.body().length < 100) {
+        byte[] bytes = parseImageResponse(res.body());
+        if (bytes.length < 100) {
             throw new IOException("The image endpoint returned almost nothing — try another prompt.");
         }
-        return res.body();
+        return bytes;
+    }
+
+    /** Reads data[0].b64_json (or data[0].url is left to fail loudly). */
+    static byte[] parseImageResponse(String json) throws IOException {
+        try {
+            JsonObject o = JsonParser.parseString(json).getAsJsonObject();
+            JsonArray data = o.getAsJsonArray("data");
+            if (data == null || data.size() == 0) {
+                throw new IOException("No image in the response.");
+            }
+            JsonObject first = data.get(0).getAsJsonObject();
+            if (first.has("b64_json") && first.get("b64_json").isJsonPrimitive()) {
+                return java.util.Base64.getDecoder().decode(first.get("b64_json").getAsString());
+            }
+            throw new IOException("The image response had no b64_json field.");
+        } catch (RuntimeException e) {
+            throw new IOException("Could not read the image response: " + e.getMessage());
+        }
     }
 
     public static List<ModelInfo> listModels(String apiKey) throws IOException, InterruptedException {

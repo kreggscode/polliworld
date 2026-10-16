@@ -42,7 +42,7 @@ instead of failing silently.
 ## API used
 
 - `POST https://gen.pollinations.ai/v1/chat/completions` — `/polli ask`, NPC conversations
-- `GET https://gen.pollinations.ai/<prompt>?model=…&width=128&height=128` — `/polli image`
+- `POST https://gen.pollinations.ai/v1/images/generations` — `/polli image` (b64 response, painted onto a map item)
 - `GET https://gen.pollinations.ai/text/models` — `/polli models`
 - `POST https://enter.pollinations.ai/api/device/code` + `/api/device/token` — `/polli signin` (BYOP)
 
