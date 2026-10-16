@@ -178,6 +178,97 @@ public final class PollinationsApi {
         }
     }
 
+    // ------------------------------------------------------ account (pollen)
+
+    public record Balance(double pollen, double questPollen, double paidPollen) {}
+
+    /**
+     * Cost of the newest billed request on this key, in USD — at $1 ≈ 1 Pollen
+     * that number IS the Pollen cost. Called right after a request, so the
+     * newest record is ours. Best-effort: callers use {@link #costLine} and
+     * simply drop the detail when the key can't read its own usage.
+     */
+    public static double lastCostUsd(String apiKey) throws IOException, InterruptedException {
+        HttpRequest req = HttpRequest.newBuilder(URI.create(GEN + "/account/key/usage?format=json&limit=1"))
+                .timeout(Duration.ofSeconds(15))
+                .header("Authorization", "Bearer " + apiKey)
+                .GET()
+                .build();
+        HttpResponse<String> res = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
+        if (res.statusCode() != 200) {
+            throw new IOException("Usage lookup failed: " + errorMessage(res.body(), res.statusCode()));
+        }
+        return parseLastCost(res.body());
+    }
+
+    public static double parseLastCost(String json) throws IOException {
+        try {
+            JsonObject o = JsonParser.parseString(json).getAsJsonObject();
+            JsonArray usage = o.getAsJsonArray("usage");
+            if (usage == null || usage.size() == 0) {
+                return 0;
+            }
+            JsonObject first = usage.get(0).getAsJsonObject();
+            return first.has("cost_usd") && first.get("cost_usd").isJsonPrimitive()
+                    ? first.get("cost_usd").getAsDouble()
+                    : 0;
+        } catch (RuntimeException e) {
+            throw new IOException("Could not read the usage history: " + e.getMessage());
+        }
+    }
+
+    /** " · ~0.00008614 Pollen", or "" when the key can't read its own usage. */
+    public static String costLine(String apiKey) {
+        try {
+            return " · " + formatPollen(lastCostUsd(apiKey));
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    public static String formatPollen(double usd) {
+        String s = String.format(java.util.Locale.ROOT, "%.8f", usd);
+        if (s.indexOf('.') >= 0) {
+            s = s.replaceAll("0+$", "").replaceAll("\\.$", "");
+        }
+        return "~" + s + " Pollen";
+    }
+
+    /** GET /account/balance — Pollen visible to this key (budgeted keys see their remaining budget). */
+    public static Balance balance(String apiKey) throws IOException, InterruptedException {
+        HttpRequest req = HttpRequest.newBuilder(URI.create(GEN + "/account/balance"))
+                .timeout(Duration.ofSeconds(15))
+                .header("Authorization", "Bearer " + apiKey)
+                .GET()
+                .build();
+        HttpResponse<String> res = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
+        if (res.statusCode() != 200) {
+            throw new IOException("Balance lookup failed: " + errorMessage(res.body(), res.statusCode()));
+        }
+        return parseBalance(res.body());
+    }
+
+    public static Balance parseBalance(String json) throws IOException {
+        try {
+            JsonObject o = JsonParser.parseString(json).getAsJsonObject();
+            double balance = o.has("balance") ? o.get("balance").getAsDouble() : 0;
+            double tier = 0;
+            double paid = 0;
+            if (o.has("accountBalance") && o.get("accountBalance").isJsonObject()) {
+                JsonObject ab = o.getAsJsonObject("accountBalance");
+                if (ab.has("tier")) {
+                    tier = ab.get("tier").getAsDouble();
+                }
+                if (ab.has("paid")) {
+                    paid = ab.get("paid").getAsDouble();
+                }
+            }
+            return new Balance(balance, tier, paid);
+        } catch (RuntimeException e) {
+            throw new IOException("Could not read the balance: " + e.getMessage());
+        }
+    }
+
     public static List<ModelInfo> listModels(String apiKey) throws IOException, InterruptedException {
         HttpRequest req = HttpRequest.newBuilder(URI.create(GEN + "/text/models"))
                 .timeout(Duration.ofSeconds(30))

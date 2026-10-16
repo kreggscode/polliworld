@@ -35,7 +35,7 @@ public final class PolliWorld extends JavaPlugin {
     public void onEnable() {
         saveDefaultConfig();
         cfg = new PluginConfig(getConfig());
-        memory = new MemoryStore(cfg.npcMemoryMessages());
+        memory = MemoryStore.fromLines(readState("memory.txt"), cfg.npcMemoryMessages());
         keyStore = KeyStore.fromLines(readState("keys.yml"));
         budget = BudgetLimiter.fromLines(readState("budget.txt"), cfg.chatCooldownSeconds(), cfg.maxImagesPerDay());
         pool = Executors.newFixedThreadPool(2, r -> {
@@ -66,6 +66,7 @@ public final class PolliWorld extends JavaPlugin {
     public void onDisable() {
         saveState("keys.yml", keyStore.toLines());
         saveState("budget.txt", budget.toLines());
+        saveMemory();
         if (npcManager != null) {
             npcManager.saveDefinitions();
         }
@@ -119,6 +120,11 @@ public final class PolliWorld extends JavaPlugin {
 
     public void saveKeys() {
         saveState("keys.yml", keyStore.toLines());
+    }
+
+    /** Written after every exchange, so a crash cannot lose a conversation. */
+    public void saveMemory() {
+        saveState("memory.txt", memory.toLines());
     }
 
     // ------------------------------------------------------------------- state

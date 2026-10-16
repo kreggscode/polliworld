@@ -142,8 +142,10 @@ public class SessionManager implements Listener {
             try {
                 PollinationsApi.Completion result =
                         PollinationsApi.chat(key, model, system, history, message);
+                String cost = PollinationsApi.costLine(key);
                 plugin.memory().add(npcName, player.getUniqueId().toString(), "user", message);
                 plugin.memory().add(npcName, player.getUniqueId().toString(), "assistant", result.content());
+                plugin.saveMemory();
                 plugin.getServer().getScheduler().runTask(plugin, () -> {
                     if (!player.isOnline()) {
                         return;
@@ -151,7 +153,7 @@ public class SessionManager implements Listener {
                     player.sendMessage(Component.text(npcName + ": ", NamedTextColor.YELLOW)
                             .append(Component.text(result.content(), NamedTextColor.WHITE)));
                     player.sendMessage(Component.text(
-                            "· " + result.inTokens() + " in / " + result.outTokens() + " out tokens · " + model,
+                            "· " + result.inTokens() + " in / " + result.outTokens() + " out tokens · " + model + cost,
                             NamedTextColor.DARK_GRAY));
                 });
             } catch (Exception e) {

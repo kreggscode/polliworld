@@ -90,8 +90,7 @@ public class PolliCommand implements CommandExecutor, TabCompleter {
             case "models" -> consoleModels(sender);
             case "say" -> consoleSay(sender, args);
             case "npc" -> consoleNpc(sender, args);
-            case "status" -> sender.sendMessage("[PolliWorld] key: " + (plugin.cfg().apiKey().isBlank() ? "none" : "server key set")
-                    + " · text " + plugin.cfg().textModel() + " · image " + plugin.cfg().imageModel());
+            case "status" -> consoleStatus(sender);
             case "help" -> sender.sendMessage("Usage: /polli <ask|image|models|npc create <name> [persona]|status>");
             default -> sender.sendMessage("Unknown subcommand: " + args[0]);
         }
@@ -115,13 +114,15 @@ public class PolliCommand implements CommandExecutor, TabCompleter {
                         key, model,
                         "You are a helpful assistant for players on a Minecraft server. Answer in one to three short, friendly sentences.",
                         plugin.memory().recent("(console)", "console", 12), question);
+                String cost = PollinationsApi.costLine(key);
                 plugin.memory().add("(console)", "console", "user", question);
                 plugin.memory().add("(console)", "console", "assistant", result.content());
+                plugin.saveMemory();
                 plugin.getLogger().info("[console] ask: " + result.content());
-                plugin.getLogger().info("[console] " + result.inTokens() + " in / " + result.outTokens() + " out tokens · " + model);
+                plugin.getLogger().info("[console] " + result.inTokens() + " in / " + result.outTokens() + " out tokens · " + model + cost);
                 plugin.getServer().getScheduler().runTask(plugin, () -> {
                     sender.sendMessage(result.content());
-                    sender.sendMessage("· " + result.inTokens() + " in / " + result.outTokens() + " out tokens · " + model);
+                    sender.sendMessage("· " + result.inTokens() + " in / " + result.outTokens() + " out tokens · " + model + cost);
                 });
             } catch (Exception e) {
                 plugin.getServer().getScheduler().runTask(plugin, () -> sender.sendMessage("Ask failed: " + e.getMessage()));
@@ -155,18 +156,42 @@ public class PolliCommand implements CommandExecutor, TabCompleter {
             try {
                 PollinationsApi.Completion result = PollinationsApi.chat(
                         key, model, system, plugin.memory().recent(npcName, "console", 16), message);
+                String cost = PollinationsApi.costLine(key);
                 plugin.memory().add(npcName, "console", "user", message);
                 plugin.memory().add(npcName, "console", "assistant", result.content());
+                plugin.saveMemory();
                 plugin.getLogger().info("[console] " + npcName + ": " + result.content());
-                plugin.getLogger().info("[console] " + result.inTokens() + " in / " + result.outTokens() + " out tokens · " + model);
+                plugin.getLogger().info("[console] " + result.inTokens() + " in / " + result.outTokens() + " out tokens · " + model + cost);
                 plugin.getServer().getScheduler().runTask(plugin, () -> {
                     sender.sendMessage(npcName + ": " + result.content());
-                    sender.sendMessage("· " + result.inTokens() + " in / " + result.outTokens() + " out tokens · " + model);
+                    sender.sendMessage("· " + result.inTokens() + " in / " + result.outTokens() + " out tokens · " + model + cost);
                 });
             } catch (Exception e) {
                 plugin.getLogger().warning("[console] " + npcName + " could not answer: " + e.getMessage());
                 plugin.getServer().getScheduler().runTask(plugin,
                         () -> sender.sendMessage(npcName + " could not answer: " + e.getMessage()));
+            }
+        });
+    }
+
+    /** Console/RCON status — balance goes to the log, since RCON drops async replies. */
+    private void consoleStatus(CommandSender sender) {
+        sender.sendMessage("[PolliWorld] key: " + (plugin.cfg().apiKey().isBlank() ? "none" : "server key set")
+                + " · text " + plugin.cfg().textModel() + " · image " + plugin.cfg().imageModel());
+        String key = plugin.cfg().apiKey();
+        if (key.isBlank()) {
+            return;
+        }
+        plugin.pool().submit(() -> {
+            try {
+                PollinationsApi.Balance b = PollinationsApi.balance(key);
+                String detail = b.questPollen() > 0 || b.paidPollen() > 0
+                        ? " (Quest " + b.questPollen() + " · Paid " + b.paidPollen() + ")" : "";
+                String line = "[PolliWorld] Pollen on the server key: " + b.pollen() + detail;
+                plugin.getLogger().info(line);
+                plugin.getServer().getScheduler().runTask(plugin, () -> sender.sendMessage(line));
+            } catch (Exception e) {
+                plugin.getLogger().info("[PolliWorld] balance unavailable: " + e.getMessage());
             }
         });
     }
@@ -209,12 +234,13 @@ public class PolliCommand implements CommandExecutor, TabCompleter {
         plugin.pool().submit(() -> {
             try {
                 byte[] bytes = PollinationsApi.image(key, prompt, model, MapArt.SIZE, MapArt.SIZE);
+                String cost = PollinationsApi.costLine(key);
                 BufferedImage art = MapArt.fit(MapArt.decode(bytes));
                 File dir = new File(plugin.getDataFolder(), "images");
                 Files.createDirectories(dir.toPath());
                 File out = new File(dir, "console-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) + ".png");
                 ImageIO.write(art, "png", out);
-                plugin.getLogger().info("[console] picture saved: " + out.getPath());
+                plugin.getLogger().info("[console] picture saved: " + out.getPath() + (cost.isBlank() ? "" : cost));
                 // Showcase: paint it onto a real map item and hang it in an
                 // item frame at spawn — this exercises the same MapPainter the
                 // player path uses. Blocks/entities need the main thread.
@@ -235,7 +261,7 @@ public class PolliCommand implements CommandExecutor, TabCompleter {
                     } catch (Exception frameErr) {
                         plugin.getLogger().warning("[console] frame placement failed: " + frameErr.getMessage());
                     }
-                    sender.sendMessage("Picture saved: " + out.getPath());
+                    sender.sendMessage("Picture saved: " + out.getPath() + cost);
                 });
             } catch (Exception e) {
                 plugin.getLogger().warning("[console] image failed: " + e.getMessage());
@@ -323,6 +349,7 @@ public class PolliCommand implements CommandExecutor, TabCompleter {
         plugin.pool().submit(() -> {
             try {
                 PollinationsApi.Completion result = PollinationsApi.chat(key, model, system, history, question);
+                String cost = PollinationsApi.costLine(key);
                 plugin.memory().add(ASK_NPC, player.getUniqueId().toString(), "user", question);
                 plugin.memory().add(ASK_NPC, player.getUniqueId().toString(), "assistant", result.content());
                 plugin.getLogger().info("[console] ask: " + result.content());
@@ -332,7 +359,7 @@ public class PolliCommand implements CommandExecutor, TabCompleter {
                     }
                     player.sendMessage(Component.text(result.content(), NamedTextColor.WHITE));
                     player.sendMessage(Component.text(
-                            "· " + result.inTokens() + " in / " + result.outTokens() + " out tokens · " + model
+                            "· " + result.inTokens() + " in / " + result.outTokens() + " out tokens · " + model + cost
                                     + (plugin.hasOwnKey(player) ? " · your Pollen" : " · server key"),
                             NamedTextColor.DARK_GRAY));
                 });
@@ -368,6 +395,7 @@ public class PolliCommand implements CommandExecutor, TabCompleter {
         plugin.pool().submit(() -> {
             try {
                 byte[] bytes = PollinationsApi.image(key, prompt, model, MapArt.SIZE, MapArt.SIZE);
+                String cost = PollinationsApi.costLine(key);
                 BufferedImage art = MapArt.fit(MapArt.decode(bytes));
                 savePng(plugin, prompt, art);
                 plugin.budget().recordImage(uuid, System.currentTimeMillis());
@@ -383,7 +411,7 @@ public class PolliCommand implements CommandExecutor, TabCompleter {
                     player.getInventory().addItem(map);
                     player.sendMessage(Component.text("Here is your picture, painted on a real map item.", NamedTextColor.GREEN));
                     player.sendMessage(Component.text(
-                            "· saved under plugins/PolliWorld/images · " + model
+                            "· saved under plugins/PolliWorld/images · " + model + cost
                                     + (plugin.hasOwnKey(player) ? " · your Pollen" : " · server key"),
                             NamedTextColor.DARK_GRAY));
                 });
@@ -613,6 +641,24 @@ public class PolliCommand implements CommandExecutor, TabCompleter {
         player.sendMessage(Component.text(
                 "Talking to: " + (npc == null ? "nobody (right-click an NPC or /polli say <npc> <msg>)" : npc),
                 NamedTextColor.WHITE));
+        String key = plugin.apiKeyFor(player);
+        if (key != null && !key.isBlank()) {
+            plugin.pool().submit(() -> {
+                try {
+                    PollinationsApi.Balance b = PollinationsApi.balance(key);
+                    String detail = b.questPollen() > 0 || b.paidPollen() > 0
+                            ? " (Quest " + b.questPollen() + " · Paid " + b.paidPollen() + ")"
+                            : "";
+                    plugin.getServer().getScheduler().runTask(plugin, () -> {
+                        if (player.isOnline()) {
+                            player.sendMessage(Component.text("Pollen on this key: " + b.pollen() + detail, NamedTextColor.WHITE));
+                        }
+                    });
+                } catch (Exception ignored) {
+                    // A key that can't read its balance simply gets no balance line.
+                }
+            });
+        }
     }
 
     private void help(Player player) {

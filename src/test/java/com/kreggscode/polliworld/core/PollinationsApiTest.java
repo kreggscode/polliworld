@@ -76,4 +76,35 @@ class PollinationsApiTest {
         assertThrows(IOException.class, () -> PollinationsApi.parseImageResponse("{\"data\":[]}"));
         assertThrows(IOException.class, () -> PollinationsApi.parseImageResponse("garbage"));
     }
+
+    @Test
+    void parsesTheNewestUsageCost() throws Exception {
+        // Shape verified live against gen.pollinations.ai/account/key/usage.
+        String json = """
+                {"usage":[{"timestamp":"2026-10-16 12:00:01","type":"generate.text",
+                  "model":"openai/gpt-5.4-nano","cost_usd":0.00008614}],"count":1}""";
+        assertEquals(0.00008614, PollinationsApi.parseLastCost(json), 1e-12);
+        assertEquals(0, PollinationsApi.parseLastCost("{\"usage\":[],\"count\":0}"), 1e-12);
+        assertThrows(IOException.class, () -> PollinationsApi.parseLastCost("garbage"));
+    }
+
+    @Test
+    void formatsPollenCostsForChat() {
+        assertEquals("~0.00008614 Pollen", PollinationsApi.formatPollen(0.00008614));
+        assertEquals("~0.5 Pollen", PollinationsApi.formatPollen(0.5));
+    }
+
+    @Test
+    void parsesBalanceWithAndWithoutAccountBreakdown() throws Exception {
+        // Shape verified live against gen.pollinations.ai/account/balance.
+        PollinationsApi.Balance b = PollinationsApi.parseBalance(
+                "{\"balance\":12.5,\"accountBalance\":{\"total\":12.5,\"tier\":8,\"paid\":4.5}}");
+        assertEquals(12.5, b.pollen(), 1e-9);
+        assertEquals(8, b.questPollen(), 1e-9);
+        assertEquals(4.5, b.paidPollen(), 1e-9);
+        PollinationsApi.Balance budgeted = PollinationsApi.parseBalance("{\"balance\":3.25}");
+        assertEquals(3.25, budgeted.pollen(), 1e-9);
+        assertEquals(0, budgeted.questPollen(), 1e-9);
+        assertThrows(IOException.class, () -> PollinationsApi.parseBalance("garbage"));
+    }
 }

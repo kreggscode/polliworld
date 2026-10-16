@@ -20,7 +20,7 @@ Commands were issued over RCON to the same server a player would join at localho
 [11:39:20 INFO]: [PolliWorld] [console] ask: Pollinations is an online AI image generator that can create artwork from text prompts; a Minecraft server might want it to generate custom images for things like map art, banners, or voting/creative prompts, without needing players to create every image manually.
 [11:39:20 INFO]: [PolliWorld] [console] 49 in / 52 out tokens · openai/gpt-5.4-nano
 
---- restart (NPC definitions + memory survive) ---
+--- restart (NPC definitions survived; see the memory fix in the v1.0.0 section below) ---
 [11:54:03 INFO]: [PolliWorld] Enabling PolliWorld v1.0.0
 [11:54:03 INFO]: [PolliWorld] Loaded 1 NPC definition(s).
 [11:54:04 INFO]: Done (17.644s)! For help, type "help"
@@ -35,3 +35,46 @@ PNGs produced by the plugin are committed next to this file:
   village-on-item-frame.png   — the same art painted onto a real 128x128 map item and hung in an item frame at spawn
 
 23 unit tests (memory round-trips, device flow, budgets, chat/image/model parsing) pass in `./gradlew test`.
+
+================================================================================
+v1.0.0 final — Pollen cost on every answer, live balance, restart-proof memory
+================================================================================
+
+While gathering restart evidence the earlier claim "memory survives a restart"
+FAILED for real: NPC definitions came back, but a phrase given to Bjorn before a
+restart was gone after it. Root cause: MemoryStore had a tested serialiser but
+was never wired to disk (no load in onEnable, no save in onDisable). Fixed in
+v1.0.0: memory loads from plugins/PolliWorld/memory.txt on enable and is saved
+after every exchange, so even a crash keeps the conversation.
+
+--- boot with the fixed build, 22:33 ---
+[22:33:13 INFO]: [PolliWorld] Enabling PolliWorld v1.0.0
+[22:33:13 INFO]: [PolliWorld] Loaded 1 NPC definition(s).
+[22:33:14 INFO]: Done (13.395s)! For help, type "help"
+
+--- RCON> polli say Bjorn Remember this phrase for later: lantern-falcon-9 ---
+[22:34:47 INFO]: [PolliWorld] [console] Bjorn: I'll remember it for you, friend: **lantern-falcon-9**. If you need it later, just ask.
+[22:34:47 INFO]: [PolliWorld] [console] 63 in / 30 out tokens · openai/gpt-5.4-nano · ~0.0000818 Pollen
+
+--- plugins/PolliWorld/memory.txt right after (the new persistence) ---
+Bjorn|console
+1792170287722|user|Remember this phrase for later: lantern-falcon-9
+1792170287723|assistant|I'll remember it for you, friend: **lantern-falcon-9**. If you need it later, just ask.
+.
+
+--- full server restart (clean stop, fresh JVM), then: ---
+--- RCON> polli say Bjorn What phrase did I ask you to remember? ---
+[22:36:06 INFO]: [PolliWorld] Enabling PolliWorld v1.0.0
+[22:36:18 INFO]: [PolliWorld] [console] Bjorn: You asked me to remember: **lantern-falcon-9**.
+[22:36:18 INFO]: [PolliWorld] [console] 109 in / 18 out tokens · openai/gpt-5.4-nano · ~0.00119771 Pollen
+
+--- RCON> polli status (live Pollen balance from GET /account/balance) ---
+[22:29:11 INFO]: [PolliWorld] [PolliWorld] Pollen on the server key: 62.12069631 (Quest 60.81387269 · Paid 1.30682362)
+
+Every answer now prints its real cost, read back from GET /account/key/usage
+(the newest record's cost_usd; $1 ≈ 1 Pollen). Example from /polli ask:
+[22:29:24 INFO]: [PolliWorld] [console] ask: Pollinations is a free, AI-generated image platform/community where you can create or discover artwork from text prompts and other users' creations.
+[22:29:24 INFO]: [PolliWorld] [console] 39 in / 30 out tokens · openai/gpt-5.4-nano · ~0.00004196 Pollen
+
+26 unit tests pass in `./gradlew build`, and GitHub Actions runs the same build
+on every push (`.github/workflows/ci.yml`).

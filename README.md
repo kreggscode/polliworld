@@ -1,5 +1,8 @@
 # PolliWorld
 
+[![ci](https://github.com/kreggscode/polliworld/actions/workflows/ci.yml/badge.svg)](https://github.com/kreggscode/polliworld/actions/workflows/ci.yml)
+[![Made with pollinations.ai](https://raw.githubusercontent.com/pollinations/pollinations/main/packages/ui/src/brand/badge-made-with.svg)](https://pollinations.ai/?ref=badge)
+
 **Pollinations AI for Minecraft servers.** One plugin: `/polli ask` answers questions, `/polli image` paints a
 picture onto a real in-game map item, `/polli models` reads the live model lists, and talking **villager NPCs**
 with personas and per-player memory roam your spawn. Players can **bring their own Pollen**: `/polli signin`
@@ -11,14 +14,14 @@ walks them through the device flow and their commands bill to *their* key.
 
 | Command | What it does |
 | --- | --- |
-| `/polli ask <question>` | Ask Pollinations; reply in chat with token usage |
-| `/polli image <prompt>` | Generate a picture and receive it painted on a **map item** (PNG also saved) |
+| `/polli ask <question>` | Ask Pollinations; reply in chat with token usage and the **Pollen cost** of the request |
+| `/polli image <prompt>` | Generate a picture and receive it painted on a **map item** (PNG also saved, cost shown) |
 | `/polli models` | The live `gen.pollinations.ai` model lists, free vs Paid Pollen |
 | `/polli npc create <name> [persona]` | Spawn a talking villager NPC (op) |
 | `/polli say <npc> <message>` | Ask an NPC directly |
 | `/polli bye` | Leave the conversation |
 | `/polli signin` | **BYOP**: approve a device code in your browser, then your own commands pay with your own Pollen |
-| `/polli status` | Key source, models, picture budget, current conversation |
+| `/polli status` | Key source, models, picture budget, current conversation, **live Pollen balance** |
 
 Right-click an NPC to start chatting: your chat messages go to the NPC (shown as `[→ name]`) until `/polli bye`
 or a timeout. Each player has their own memory of each NPC, persisted across restarts.
@@ -45,6 +48,8 @@ instead of failing silently.
 - `POST https://gen.pollinations.ai/v1/chat/completions` — `/polli ask`, NPC conversations
 - `POST https://gen.pollinations.ai/v1/images/generations` — `/polli image` (b64 response, painted onto a map item)
 - `GET https://gen.pollinations.ai/text/models` — `/polli models`
+- `GET https://gen.pollinations.ai/account/key/usage` — the **Pollen cost** printed after every answer and picture
+- `GET https://gen.pollinations.ai/account/balance` — the Pollen balance in `/polli status`
 - `POST https://enter.pollinations.ai/api/device/code` + `/api/device/token` — `/polli signin` (BYOP)
 
 All calls run **off the main server thread**; results are handed back on it.
