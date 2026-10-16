@@ -12,9 +12,11 @@ import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Location;
+import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.command.ConsoleCommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
@@ -47,28 +49,169 @@ public class PolliCommand implements CommandExecutor, TabCompleter {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!(sender instanceof Player player)) {
-            sender.sendMessage("Players only.");
+        if (sender instanceof Player player) {
+            if (args.length == 0) {
+                help(player);
+                return true;
+            }
+            String sub = args[0].toLowerCase(Locale.ROOT);
+            switch (sub) {
+                case "ask" -> ask(player, rest(args));
+                case "image" -> image(player, rest(args));
+                case "models" -> models(player);
+                case "npc" -> npc(player, args);
+                case "say" -> say(player, args);
+                case "bye" -> plugin.sessionManager().end(player);
+                case "signin" -> signin(player);
+                case "status" -> status(player);
+                case "help" -> help(player);
+                default -> help(player);
+            }
             return true;
         }
-        if (args.length == 0) {
-            help(player);
+        if (!(sender instanceof Player)) {
+            // Console or RCON: same server-key commands.
+            console(sender, args);
             return true;
-        }
-        String sub = args[0].toLowerCase(Locale.ROOT);
-        switch (sub) {
-            case "ask" -> ask(player, rest(args));
-            case "image" -> image(player, rest(args));
-            case "models" -> models(player);
-            case "npc" -> npc(player, args);
-            case "say" -> say(player, args);
-            case "bye" -> plugin.sessionManager().end(player);
-            case "signin" -> signin(player);
-            case "status" -> status(player);
-            case "help" -> help(player);
-            default -> help(player);
         }
         return true;
+    }
+
+    /** Console support: /polli ask|image|models|npc run with the server's key. */
+    private void console(CommandSender sender, String[] args) {
+        if (args.length == 0) {
+            sender.sendMessage("Usage: /polli <ask|image|models|npc|status|help>");
+            return;
+        }
+        switch (args[0].toLowerCase(Locale.ROOT)) {
+            case "ask" -> consoleAsk(sender, rest(args));
+            case "image" -> consoleImage(sender, rest(args));
+            case "models" -> consoleModels(sender);
+            case "npc" -> consoleNpc(sender, args);
+            case "status" -> sender.sendMessage("[PolliWorld] key: " + (plugin.cfg().apiKey().isBlank() ? "none" : "server key set")
+                    + " · text " + plugin.cfg().textModel() + " · image " + plugin.cfg().imageModel());
+            case "help" -> sender.sendMessage("Usage: /polli <ask|image|models|npc create <name> [persona]|status>");
+            default -> sender.sendMessage("Unknown subcommand: " + args[0]);
+        }
+    }
+
+    private void consoleAsk(CommandSender sender, String question) {
+        if (question.isEmpty()) {
+            sender.sendMessage("Usage: /polli ask <question>");
+            return;
+        }
+        String key = plugin.cfg().apiKey();
+        if (key.isBlank()) {
+            sender.sendMessage("No api-key in config.yml.");
+            return;
+        }
+        String model = plugin.cfg().textModel();
+        sender.sendMessage("Asking " + model + "…");
+        plugin.pool().submit(() -> {
+            try {
+                PollinationsApi.Completion result = PollinationsApi.chat(
+                        key, model,
+                        "You are a helpful assistant for players on a Minecraft server. Answer in one to three short, friendly sentences.",
+                        plugin.memory().recent("(console)", "console", 12), question);
+                plugin.memory().add("(console)", "console", "user", question);
+                plugin.memory().add("(console)", "console", "assistant", result.content());
+                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                    sender.sendMessage(result.content());
+                    sender.sendMessage("· " + result.inTokens() + " in / " + result.outTokens() + " out tokens · " + model);
+                });
+            } catch (Exception e) {
+                plugin.getServer().getScheduler().runTask(plugin, () -> sender.sendMessage("Ask failed: " + e.getMessage()));
+            }
+        });
+    }
+
+    private void consoleModels(CommandSender sender) {
+        String key = plugin.cfg().apiKey();
+        plugin.pool().submit(() -> {
+            try {
+                List<PollinationsApi.ModelInfo> list = PollinationsApi.listModels(key);
+                long free = list.stream().filter(m -> !m.paidOnly()).count();
+                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                    sender.sendMessage("Live text models: " + list.size() + " (" + free + " free, "
+                            + (list.size() - free) + " Paid Pollen)");
+                    sender.sendMessage("First free: " + trimNames(
+                            list.stream().filter(m -> !m.paidOnly()).map(PollinationsApi.ModelInfo::name).toList()));
+                    sender.sendMessage("First paid: " + trimNames(
+                            list.stream().filter(PollinationsApi.ModelInfo::paidOnly).map(PollinationsApi.ModelInfo::name).toList()));
+                });
+            } catch (Exception e) {
+                plugin.getServer().getScheduler().runTask(plugin, () -> sender.sendMessage("Model list failed: " + e.getMessage()));
+            }
+        });
+    }
+
+    private void consoleImage(CommandSender sender, String prompt) {
+        if (prompt.isEmpty()) {
+            sender.sendMessage("Usage: /polli image <prompt>");
+            return;
+        }
+        String key = plugin.cfg().apiKey();
+        if (key.isBlank()) {
+            sender.sendMessage("No api-key in config.yml.");
+            return;
+        }
+        String model = plugin.cfg().imageModel();
+        sender.sendMessage("Painting a picture with " + model + "…");
+        plugin.pool().submit(() -> {
+            try {
+                byte[] bytes = PollinationsApi.image(key, prompt, model, MapArt.SIZE, MapArt.SIZE);
+                BufferedImage art = MapArt.fit(MapArt.decode(bytes));
+                File dir = new File(plugin.getDataFolder(), "images");
+                Files.createDirectories(dir.toPath());
+                File out = new File(dir, "console-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) + ".png");
+                ImageIO.write(art, "png", out);
+                plugin.getServer().getScheduler().runTask(plugin, () ->
+                        sender.sendMessage("Picture saved: " + out.getPath()));
+            } catch (Exception e) {
+                plugin.getServer().getScheduler().runTask(plugin, () -> sender.sendMessage("Image failed: " + e.getMessage()));
+            }
+        });
+    }
+
+    private void consoleNpc(CommandSender sender, String[] args) {
+        if (args.length >= 2 && args[1].equalsIgnoreCase("create") && args.length >= 3) {
+            String name = args[2];
+            if (plugin.npcManager().exists(name)) {
+                sender.sendMessage("There already is an NPC named " + name + ".");
+                return;
+            }
+            String persona = args.length > 3
+                    ? String.join(" ", java.util.Arrays.copyOfRange(args, 3, args.length))
+                    : "a wise and friendly villager who loves talking about the server";
+            World world = plugin.getServer().getWorld("world");
+            if (world == null) {
+                sender.sendMessage("World 'world' not found.");
+                return;
+            }
+            Location spawn = world.getSpawnLocation();
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                plugin.npcManager().define(name, persona, spawn);
+                sender.sendMessage("NPC " + name + " spawned at world spawn with persona: " + persona);
+            });
+            return;
+        }
+        if (args.length >= 2 && args[1].equalsIgnoreCase("remove") && args.length >= 3) {
+            boolean ok = plugin.npcManager().remove(args[2]);
+            sender.sendMessage(ok ? "NPC " + args[2] + " removed." : "No NPC named " + args[2] + ".");
+            return;
+        }
+        if (args.length >= 2 && args[1].equalsIgnoreCase("list")) {
+            var all = plugin.npcManager().all();
+            if (all.isEmpty()) {
+                sender.sendMessage("No NPCs yet.");
+                return;
+            }
+            for (NpcManager.Definition d : all.values()) {
+                sender.sendMessage(d.name() + " — " + d.persona() + " @ " + d.world());
+            }
+            return;
+        }
+        sender.sendMessage("Usage: /polli npc create <name> [persona] | remove <name> | list");
     }
 
     private static String rest(String[] args) {
@@ -253,7 +396,8 @@ public class PolliCommand implements CommandExecutor, TabCompleter {
                     player.sendMessage(Component.text("There already is an NPC named " + name + ".", NamedTextColor.RED));
                     return;
                 }
-                String persona = args.length > 3 ? rest(args).substring(name.length() + 1).trim()
+                String persona = args.length > 3
+                        ? String.join(" ", java.util.Arrays.copyOfRange(args, 3, args.length))
                         : "a wise and friendly villager who loves talking about the server";
                 plugin.npcManager().define(name, persona, player.getLocation());
                 player.sendMessage(Component.text(
@@ -291,7 +435,7 @@ public class PolliCommand implements CommandExecutor, TabCompleter {
             return;
         }
         String npcName = args[1];
-        String message = rest(args).substring(npcName.length() + 1).trim();
+        String message = String.join(" ", java.util.Arrays.copyOfRange(args, 2, args.length));
         plugin.sessionManager().say(player, npcName, message);
     }
 
