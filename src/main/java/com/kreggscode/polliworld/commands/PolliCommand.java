@@ -217,25 +217,26 @@ public class PolliCommand implements CommandExecutor, TabCompleter {
                 plugin.getLogger().info("[console] picture saved: " + out.getPath());
                 // Showcase: paint it onto a real map item and hang it in an
                 // item frame at spawn — this exercises the same MapPainter the
-                // player path uses.
-                try {
-                    World world = plugin.getServer().getWorlds().get(0);
-                    Location pillar = world.getSpawnLocation().add(2, 0, 2);
-                    pillar.getBlock().setType(Material.STONE_BRICKS);
-                    ItemStack map = MapPainter.paint(world, art);
-                    if (map != null) {
-                        Location frameBlock = pillar.clone().add(0, 1, 1).add(0.5, 0, 0.5);
-                        world.spawn(frameBlock, org.bukkit.entity.ItemFrame.class, f -> {
-                            f.setFacingDirection(org.bukkit.block.BlockFace.SOUTH, true);
-                            f.setItem(map);
-                        });
-                        plugin.getLogger().info("[console] map art hung in an item frame at spawn");
+                // player path uses. Blocks/entities need the main thread.
+                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                    try {
+                        World world = plugin.getServer().getWorlds().get(0);
+                        Location pillar = world.getSpawnLocation().add(2, 0, 2);
+                        pillar.getBlock().setType(Material.STONE_BRICKS);
+                        ItemStack map = MapPainter.paint(world, art);
+                        if (map != null) {
+                            Location frameBlock = pillar.clone().add(0, 1, 1).add(0.5, 0, 0.5);
+                            world.spawn(frameBlock, org.bukkit.entity.ItemFrame.class, f -> {
+                                f.setFacingDirection(org.bukkit.block.BlockFace.SOUTH, true);
+                                f.setItem(map);
+                            });
+                            plugin.getLogger().info("[console] map art hung in an item frame at spawn");
+                        }
+                    } catch (Exception frameErr) {
+                        plugin.getLogger().warning("[console] frame placement failed: " + frameErr.getMessage());
                     }
-                } catch (Exception frameErr) {
-                    plugin.getLogger().warning("[console] frame placement failed: " + frameErr.getMessage());
-                }
-                plugin.getServer().getScheduler().runTask(plugin, () ->
-                        sender.sendMessage("Picture saved: " + out.getPath()));
+                    sender.sendMessage("Picture saved: " + out.getPath());
+                });
             } catch (Exception e) {
                 plugin.getLogger().warning("[console] image failed: " + e.getMessage());
                 plugin.getServer().getScheduler().runTask(plugin, () -> sender.sendMessage("Image failed: " + e.getMessage()));

@@ -5,7 +5,7 @@ picture onto a real in-game map item, `/polli models` reads the live model lists
 with personas and per-player memory roam your spawn. Players can **bring their own Pollen**: `/polli signin`
 walks them through the device flow and their commands bill to *their* key.
 
-![Ask](docs/ask.png)
+![The picture a plugin command produced, hung in an item frame at spawn](evidence/village-on-item-frame.png)
 
 ## Commands
 
@@ -25,7 +25,8 @@ or a timeout. Each player has their own memory of each NPC, persisted across res
 
 ## Install
 
-1. Drop `PolliWorld-1.0.0.jar` into your server's `plugins/` folder (Paper 1.21.x, Java 21).
+1. Download `PolliWorld-1.0.0.jar` from the [Releases page](https://github.com/kreggscode/polliworld/releases)
+   and drop it into your server's `plugins/` folder (Paper 1.21.x, Java 21).
 2. Start the server, open `plugins/PolliWorld/config.yml`, set `api-key` to your key from
    [enter.pollinations.ai](https://enter.pollinations.ai) — or leave it empty and have every player run
    `/polli signin` with their own Pollen.
@@ -47,6 +48,13 @@ instead of failing silently.
 - `POST https://enter.pollinations.ai/api/device/code` + `/api/device/token` — `/polli signin` (BYOP)
 
 All calls run **off the main server thread**; results are handed back on it.
+
+## Evidence
+
+[`evidence/`](evidence/) holds output from the plugin running on a real Paper 1.21.11 server:
+the annotated [console log](evidence/console-log.txt) (Bjorn answering in character with token counts,
+224 live models listed, restart persistence, the image run) and the exact PNGs the plugin produced,
+including [art hung in an item frame at spawn](evidence/village-on-item-frame.png).
 
 ## Building
 
