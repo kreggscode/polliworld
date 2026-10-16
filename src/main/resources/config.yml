@@ -1,0 +1,26 @@
+# PolliWorld — Pollinations AI for Minecraft servers.
+# https://enter.pollinations.ai/quests  ·  https://pollinations.ai
+
+# The server owner's Pollen key from enter.pollinations.ai. Every call without
+# a player BYOP key bills to this one. Leave empty to require /polli signin.
+api-key: ""
+
+# Any model from /polli models (the live gen.pollinations.ai lists).
+# openai/gpt-5.4-nano is free — it works on free Pollen too.
+text-model: openai/gpt-5.4-nano
+image-model: flux
+
+npc:
+  memory-messages: 24
+  session-timeout-seconds: 90
+
+limits:
+  chat-cooldown-seconds: 2
+  max-images-per-day: 20
+
+# Bring-your-own-Pollen: players run /polli signin, approve a device code in
+# their browser, and their own commands bill to their own Pollen key.
+byop:
+  enabled: true
+  poll-seconds: 5
+  expire-seconds: 1800

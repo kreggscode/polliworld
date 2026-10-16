@@ -1,0 +1,18 @@
+name: PolliWorld
+version: 1.0.0
+main: com.kreggscode.polliworld.PolliWorld
+api-version: '1.21'
+author: kreggscode
+description: Pollinations AI for Minecraft servers — /polli ask, image on maps, live model lists, talking villager NPCs with memory, and BYOP device sign-in so players pay with their own Pollen.
+website: https://github.com/kreggscode/polliworld
+commands:
+  polli:
+    description: Pollinations AI commands
+    usage: /polli <ask|image|models|npc|say|bye|signin|status|help>
+permissions:
+  polliworld.use:
+    description: Use /polli ask, image, models, say, signin, status
+    default: true
+  polliworld.admin:
+    description: Create and remove NPC villagers
+    default: op
